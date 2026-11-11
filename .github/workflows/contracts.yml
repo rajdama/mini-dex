@@ -27,7 +27,6 @@ jobs:
         run: forge --version
 
       - name: Format check
-        continue-on-error: true
         run: forge fmt --check
 
       - name: Build

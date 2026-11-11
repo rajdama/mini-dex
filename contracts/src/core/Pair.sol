@@ -166,6 +166,9 @@ contract Pair is ERC20, ReentrancyGuard {
         // Optimistically send the output first. This is what makes flash swaps possible.
         if (amount0Out > 0) IERC20(token0).safeTransfer(to, amount0Out);
         if (amount1Out > 0) IERC20(token1).safeTransfer(to, amount1Out);
+        // Reviewed: nonReentrant blocks re-entry, and getReserves() reverts while locked, so the
+        // stale reserves can't be read mid-callback (see test_RevertWhen_ReadingReservesDuringFlashSwap).
+        // slither-disable-next-line reentrancy-no-eth
         if (data.length > 0) IFlashSwapCallee(to).flashSwapCall(msg.sender, amount0Out, amount1Out, data);
 
         _settleSwap(amount0Out, amount1Out, to);
