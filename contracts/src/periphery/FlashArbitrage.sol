@@ -51,11 +51,7 @@ contract FlashArbitrage is IFlashSwapCallee {
         uint256 amountOut = amounts[amounts.length - 1];
         if (amountOut < amountIn + minProfit || amountOut <= amountIn) revert NotProfitable(amountIn, amountOut);
 
-        // Flash-borrow the first hop's output; the rest happens in flashSwapCall.
-        address firstPair = DexLibrary.pairFor(factory, path[0], path[1]);
-        (address token0,) = DexLibrary.sortTokens(path[0], path[1]);
-        (uint256 out0, uint256 out1) = path[0] == token0 ? (uint256(0), amounts[1]) : (amounts[1], uint256(0));
-        Pair(firstPair).swap(out0, out1, address(this), abi.encode(path, amounts));
+        _startFlashSwap(path, amounts);
 
         profit = IERC20(path[0]).balanceOf(address(this));
         IERC20(path[0]).safeTransfer(msg.sender, profit);
@@ -81,6 +77,14 @@ contract FlashArbitrage is IFlashSwapCallee {
         }
 
         IERC20(path[0]).safeTransfer(msg.sender, amounts[0]);
+    }
+
+    /// @dev Flash-borrow the first hop's output; the rest of the cycle runs in flashSwapCall.
+    function _startFlashSwap(address[] calldata path, uint256[] memory amounts) internal {
+        address firstPair = DexLibrary.pairFor(factory, path[0], path[1]);
+        (address token0,) = DexLibrary.sortTokens(path[0], path[1]);
+        (uint256 out0, uint256 out1) = path[0] == token0 ? (uint256(0), amounts[1]) : (amounts[1], uint256(0));
+        Pair(firstPair).swap(out0, out1, address(this), abi.encode(path, amounts));
     }
 
     function _checkPath(address[] calldata path) internal pure {

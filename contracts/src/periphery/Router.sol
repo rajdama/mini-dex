@@ -54,11 +54,7 @@ contract Router {
             Factory(factory).createPair(tokenA, tokenB);
         }
         (amountA, amountB) = _optimalAmounts(tokenA, tokenB, amountADesired, amountBDesired, amountAMin, amountBMin);
-
-        address pair = DexLibrary.pairFor(factory, tokenA, tokenB);
-        IERC20(tokenA).safeTransferFrom(msg.sender, pair, amountA);
-        IERC20(tokenB).safeTransferFrom(msg.sender, pair, amountB);
-        liquidity = Pair(pair).mint(to);
+        liquidity = _deposit(tokenA, tokenB, amountA, amountB, to);
     }
 
     /// @notice Burn `liquidity` LP tokens and receive at least the minimum amounts of each token.
@@ -166,6 +162,17 @@ contract Router {
         uint256 amountAOptimal = DexLibrary.quote(amountBDesired, reserveB, reserveA);
         if (amountAOptimal < amountAMin) revert InsufficientAAmount();
         return (amountAOptimal, amountBDesired);
+    }
+
+    /// @dev Moves the tokens from the user into the pair and mints LP tokens to `to`.
+    function _deposit(address tokenA, address tokenB, uint256 amountA, uint256 amountB, address to)
+        internal
+        returns (uint256 liquidity)
+    {
+        address pair = DexLibrary.pairFor(factory, tokenA, tokenB);
+        IERC20(tokenA).safeTransferFrom(msg.sender, pair, amountA);
+        IERC20(tokenB).safeTransferFrom(msg.sender, pair, amountB);
+        liquidity = Pair(pair).mint(to);
     }
 
     /// @dev Each hop sends its output straight to the next pair; the last hop sends to `to`.
