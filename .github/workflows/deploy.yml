@@ -1,0 +1,96 @@
+name: deploy
+
+# Run manually from the Actions tab. Needs these repository secrets:
+#   DEPLOYER_PRIVATE_KEY  key of a fresh testnet-only wallet with some Sepolia ETH
+#   SEPOLIA_RPC_URL       e.g. an Alchemy Sepolia URL
+#   ETHERSCAN_API_KEY     for contract verification
+on:
+  workflow_dispatch:
+    inputs:
+      redeploy:
+        description: "Deploy again even if contracts/deployments/11155111.json exists"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency: deploy
+
+defaults:
+  run:
+    working-directory: contracts
+
+jobs:
+  deploy:
+    name: Deploy to Sepolia
+    runs-on: ubuntu-latest
+    env:
+      PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+      SEPOLIA_RPC_URL: ${{ secrets.SEPOLIA_RPC_URL }}
+      ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+      DEPLOYMENT: deployments/11155111.json
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Check secrets
+        run: |
+          missing=""
+          [ -n "$PRIVATE_KEY" ] || missing="$missing DEPLOYER_PRIVATE_KEY"
+          [ -n "$SEPOLIA_RPC_URL" ] || missing="$missing SEPOLIA_RPC_URL"
+          [ -n "$ETHERSCAN_API_KEY" ] || missing="$missing ETHERSCAN_API_KEY"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secrets:$missing (Settings > Secrets and variables > Actions)"
+            exit 1
+          fi
+
+      - name: Refuse accidental redeploy
+        if: ${{ !inputs.redeploy }}
+        run: |
+          if [ -f "$DEPLOYMENT" ]; then
+            echo "::error::Already deployed ($DEPLOYMENT exists). Re-run with 'redeploy' ticked to deploy fresh contracts."
+            exit 1
+          fi
+
+      - uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Deploy
+        run: forge script script/Deploy.s.sol --rpc-url sepolia --broadcast --slow
+
+      - name: Save deployment
+        working-directory: .
+        run: |
+          cat contracts/$DEPLOYMENT
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add contracts/$DEPLOYMENT
+          git commit -m "Deploy to Sepolia"
+          git pull --rebase
+          git push
+
+      - name: Verify on Etherscan
+        continue-on-error: true
+        run: |
+          verify() { forge verify-contract "$1" "$2" --chain sepolia --guess-constructor-args --rpc-url sepolia --watch || true; }
+          verify "$(jq -r .factory $DEPLOYMENT)" src/core/Factory.sol:Factory
+          verify "$(jq -r .router $DEPLOYMENT)" src/periphery/Router.sol:Router
+          verify "$(jq -r .arbitrage $DEPLOYMENT)" src/periphery/FlashArbitrage.sol:FlashArbitrage
+          for k in tokenETH tokenBTC tokenUSD tokenMDX; do verify "$(jq -r .$k $DEPLOYMENT)" src/tokens/FaucetToken.sol:FaucetToken; done
+          for k in pairETHUSD pairBTCUSD pairETHBTC; do verify "$(jq -r .$k $DEPLOYMENT)" src/core/Pair.sol:Pair; done
+          for k in farmETHUSD farmBTCUSD farmETHBTC; do verify "$(jq -r .$k $DEPLOYMENT)" src/farm/StakingRewards.sol:StakingRewards; done
+
+      - name: Summary
+        run: |
+          {
+            echo "### Deployed to Sepolia"
+            echo ""
+            echo "| Contract | Address |"
+            echo "| --- | --- |"
+            for k in factory router arbitrage tokenETH tokenBTC tokenUSD tokenMDX pairETHUSD pairBTCUSD pairETHBTC farmETHUSD farmBTCUSD farmETHBTC; do
+              a=$(jq -r .$k $DEPLOYMENT)
+              echo "| $k | [$a](https://sepolia.etherscan.io/address/$a) |"
+            done
+            echo "| startBlock | $(jq -r .startBlock $DEPLOYMENT) |"
+          } >> "$GITHUB_STEP_SUMMARY"

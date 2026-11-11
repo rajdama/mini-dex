@@ -1,0 +1,42 @@
+name: renew farms
+
+# Tops up every farm once a week so the live demo keeps paying rewards.
+# Does nothing until the contracts are deployed and the secrets are set.
+on:
+  schedule:
+    - cron: "23 6 * * 1" # Mondays 06:23 UTC
+  workflow_dispatch:
+
+concurrency: deploy
+
+defaults:
+  run:
+    working-directory: contracts
+
+jobs:
+  renew:
+    name: Start next farm period
+    runs-on: ubuntu-latest
+    env:
+      PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+      SEPOLIA_RPC_URL: ${{ secrets.SEPOLIA_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Check setup
+        id: check
+        run: |
+          if [ -f deployments/11155111.json ] && [ -n "$PRIVATE_KEY" ] && [ -n "$SEPOLIA_RPC_URL" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Not deployed yet or secrets missing; skipping."
+          fi
+
+      - uses: foundry-rs/foundry-toolchain@v1
+        if: steps.check.outputs.ready == 'true'
+
+      - name: Renew
+        if: steps.check.outputs.ready == 'true'
+        run: forge script script/RenewFarms.s.sol --rpc-url sepolia --broadcast

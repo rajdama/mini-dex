@@ -1,0 +1,101 @@
+name: screenshots
+
+# Runs the full stack (Anvil chain + contracts + indexer + arbitrage bot + production frontend)
+# with 48 hours of seeded trading, drives it with a headless browser, and saves screenshots
+# to the `screenshots` branch.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  screenshots:
+    name: Full-stack screenshots
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: minidex
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: foundry-rs/foundry-toolchain@v1
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: indexer/go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Start chain and seed 48 hours of trading
+        run: |
+          anvil --silent --timestamp $(( $(date +%s) - 48*3600 )) &
+          sleep 2
+          bash scripts/demo/seed.sh
+          echo "FACTORY=$(jq -r .factory contracts/deployments/31337.json)" >> "$GITHUB_ENV"
+          echo "ARBITRAGE=$(jq -r .arbitrage contracts/deployments/31337.json)" >> "$GITHUB_ENV"
+
+      - name: Start indexer and arbitrage bot
+        working-directory: indexer
+        env:
+          RPC_URL: http://127.0.0.1:8545
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/minidex?sslmode=disable
+          FACTORY_ADDRESS: ${{ env.FACTORY }}
+          ARBITRAGE_ADDRESS: ${{ env.ARBITRAGE }}
+          CONFIRMATIONS: "0"
+          POLL_INTERVAL: 1s
+          # Anvil test account #9. Never use this key on a real network.
+          BOT_PRIVATE_KEY: "0x2a871d0798f97d79848a013d4936a73bf4cc922c825d33c1cf7073dff6d409c6"
+          BOT_INTERVAL: 3s
+        run: |
+          go build -o /tmp/indexer ./cmd/indexer
+          nohup /tmp/indexer > /tmp/indexer.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8080/healthz && break; sleep 1; done
+          sleep 15   # index everything and let the bot fix the whale's price dislocation
+          curl -s http://127.0.0.1:8080/api/stats; echo
+          curl -s "http://127.0.0.1:8080/api/arbitrage"; echo
+          grep -E '"component":"bot"' /tmp/indexer.log | head -5 || true
+
+      - name: Build and start frontend
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_CHAIN_ID: "31337"
+          NEXT_PUBLIC_RPC_URL: http://127.0.0.1:8545
+          NEXT_PUBLIC_INDEXER_URL: http://127.0.0.1:8080
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+          nohup npx next start -H 127.0.0.1 -p 3000 > /tmp/next.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:3000 >/dev/null && break; sleep 1; done
+
+      - name: Take screenshots
+        run: |
+          mkdir -p /tmp/pw && cd /tmp/pw && npm init -y >/dev/null && npm install --no-audit --no-fund playwright@1.48.2
+          npx playwright install --with-deps chromium
+          cp "$GITHUB_WORKSPACE/scripts/demo/screenshots.mjs" /tmp/pw/
+          node /tmp/pw/screenshots.mjs "$RUNNER_TEMP/shots"
+          ls -la "$RUNNER_TEMP/shots"
+
+      - name: Logs on failure
+        if: failure()
+        run: |
+          tail -80 /tmp/indexer.log || true
+          tail -50 /tmp/next.log || true
+
+      - name: Publish to the screenshots branch
+        if: always()
+        run: |
+          cd "$RUNNER_TEMP/shots" || exit 0
+          git init -q -b screenshots
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add . && git commit -qm "Screenshots from ${GITHUB_SHA::7}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" screenshots
