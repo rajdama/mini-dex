@@ -95,8 +95,8 @@ jobs:
           for b in $(seq $((LATEST - 5)) $LATEST); do
             for h in $(cast rpc eth_getBlockByNumber "$(cast to-hex $b)" false --rpc-url $RPC | jq -r '.transactions[]?'); do
               st=$(cast receipt $h status --rpc-url $RPC)
-              echo "block $b time $(cast block $b timestamp --rpc-url $RPC) tx $h status $st"
-              case "$st" in 0*) cast run $h --rpc-url $RPC 2>&1 | tail -25 ;; esac
+              echo "block $b time $(cast block $b -f timestamp --rpc-url $RPC) from $(cast tx $h from --rpc-url $RPC) to $(cast tx $h to --rpc-url $RPC) status $st"
+              case "$st" in 0*|false*) cast run $h --rpc-url $RPC 2>&1 | tail -25 ;; esac
             done
           done
 
