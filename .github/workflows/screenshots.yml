@@ -81,8 +81,8 @@ jobs:
         timeout-minutes: 15
         run: |
           mkdir -p /tmp/pw && cd /tmp/pw && npm init -y >/dev/null && npm install --no-audit --no-fund playwright@1.48.2
-          sudo apt-get update -qq || true
-          npx playwright install --with-deps chromium || (sleep 20 && sudo apt-get update -qq && npx playwright install --with-deps chromium)
+          # Use the runner's preinstalled Google Chrome, so no system packages need downloading.
+          which google-chrome || npx playwright install chromium
           cp "$GITHUB_WORKSPACE/scripts/demo/screenshots.mjs" /tmp/pw/
           node /tmp/pw/screenshots.mjs "$RUNNER_TEMP/shots"
           ls -la "$RUNNER_TEMP/shots"

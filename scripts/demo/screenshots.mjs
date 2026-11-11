@@ -101,7 +101,8 @@ async function openTab(page, name) {
   await page.waitForTimeout(1500);
 }
 
-const browser = await chromium.launch();
+// Prefer the system Chrome (preinstalled on CI runners); fall back to Playwright's Chromium.
+const browser = await chromium.launch({ channel: "chrome" }).catch(() => chromium.launch());
 let current;
 try {
   const page = await newPage(browser, { width: 1360, height: 900 });
