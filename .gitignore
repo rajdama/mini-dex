@@ -1,0 +1,10 @@
+out/
+cache/
+**/broadcast/*/31337/
+contracts/deployments/31337.json
+.env
+.env.local
+node_modules/
+.next/
+*.tsbuildinfo
+next-env.d.ts
