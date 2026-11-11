@@ -22,6 +22,7 @@ contract FlashArbitrage is IFlashSwapCallee {
     address public immutable factory;
 
     error Expired();
+    error ZeroAddress();
     error InvalidPath();
     error NotProfitable(uint256 amountIn, uint256 amountOut);
     error UnauthorizedCallback();
@@ -29,6 +30,7 @@ contract FlashArbitrage is IFlashSwapCallee {
     event ArbitrageExecuted(address indexed caller, address indexed token, uint256 amountIn, uint256 profit);
 
     constructor(address factory_) {
+        if (factory_ == address(0)) revert ZeroAddress();
         factory = factory_;
     }
 
@@ -69,9 +71,8 @@ contract FlashArbitrage is IFlashSwapCallee {
 
         for (uint256 i = 1; i < path.length - 1; ++i) {
             address pair = DexLibrary.pairFor(factory, path[i], path[i + 1]);
-            (address token0,) = DexLibrary.sortTokens(path[i], path[i + 1]);
             (uint256 out0, uint256 out1) =
-                path[i] == token0 ? (uint256(0), amounts[i + 1]) : (amounts[i + 1], uint256(0));
+                DexLibrary.isToken0(path[i], path[i + 1]) ? (uint256(0), amounts[i + 1]) : (amounts[i + 1], uint256(0));
             IERC20(path[i]).safeTransfer(pair, amounts[i]);
             Pair(pair).swap(out0, out1, address(this), new bytes(0));
         }
@@ -82,8 +83,8 @@ contract FlashArbitrage is IFlashSwapCallee {
     /// @dev Flash-borrow the first hop's output; the rest of the cycle runs in flashSwapCall.
     function _startFlashSwap(address[] calldata path, uint256[] memory amounts) internal {
         address firstPair = DexLibrary.pairFor(factory, path[0], path[1]);
-        (address token0,) = DexLibrary.sortTokens(path[0], path[1]);
-        (uint256 out0, uint256 out1) = path[0] == token0 ? (uint256(0), amounts[1]) : (amounts[1], uint256(0));
+        (uint256 out0, uint256 out1) =
+            DexLibrary.isToken0(path[0], path[1]) ? (uint256(0), amounts[1]) : (amounts[1], uint256(0));
         Pair(firstPair).swap(out0, out1, address(this), abi.encode(path, amounts));
     }
 

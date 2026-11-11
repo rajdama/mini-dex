@@ -5,6 +5,7 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /// @notice Implemented by contracts that receive a flash swap.
 interface IFlashSwapCallee {
@@ -33,7 +34,7 @@ interface IPairDeployer {
 /// Like Uniswap V2, the pair is a low-level contract: tokens are sent to it first, then
 /// `mint`, `burn` or `swap` compares its balances with its stored reserves to see what came
 /// in. End users go through the Router, which adds slippage and deadline protection.
-contract Pair is ERC20 {
+contract Pair is ERC20, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     /// @notice LP tokens permanently locked on the first deposit. Makes the first-depositor
@@ -59,8 +60,6 @@ contract Pair is ERC20 {
     uint256 public price0CumulativeLast;
     uint256 public price1CumulativeLast;
 
-    uint256 private _unlocked = 1;
-
     error Locked();
     error Overflow();
     error InsufficientLiquidityMinted();
@@ -83,21 +82,16 @@ contract Pair is ERC20 {
     );
     event Sync(uint112 reserve0, uint112 reserve1);
 
-    /// @dev One lock for every state-changing entry point, so a flash-swap callback
-    ///      can't re-enter this pair while its balances and reserves disagree.
-    modifier lock() {
-        if (_unlocked != 1) revert Locked();
-        _unlocked = 2;
-        _;
-        _unlocked = 1;
-    }
-
     constructor() ERC20("Mini DEX LP", "MDEX-LP") {
         factory = msg.sender;
         (token0, token1) = IPairDeployer(msg.sender).parameters();
     }
 
-    function getReserves() public view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast) {
+    /// @notice Current reserves. Reverts while a swap, mint or burn is in progress: during a flash
+    ///         swap the reserves are stale, and another contract reading them as a price would be
+    ///         exposed to "read-only reentrancy" manipulation.
+    function getReserves() external view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast) {
+        if (_reentrancyGuardEntered()) revert Locked();
         return (_reserve0, _reserve1, _blockTimestampLast);
     }
 
@@ -106,14 +100,15 @@ contract Pair is ERC20 {
     // ------------------------------------------------------------------
 
     /// @notice Mint LP tokens for tokens already sent to the pair.
-    function mint(address to) external lock returns (uint256 liquidity) {
-        (uint112 r0, uint112 r1,) = getReserves();
+    function mint(address to) external nonReentrant returns (uint256 liquidity) {
+        (uint112 r0, uint112 r1) = (_reserve0, _reserve1);
         uint256 balance0 = IERC20(token0).balanceOf(address(this));
         uint256 balance1 = IERC20(token1).balanceOf(address(this));
         uint256 amount0 = balance0 - r0;
         uint256 amount1 = balance1 - r1;
 
         uint256 supply = totalSupply();
+        // slither-disable-next-line incorrect-equality
         if (supply == 0) {
             // First deposit sets the price. LP supply starts at the geometric mean of the amounts.
             uint256 root = Math.sqrt(amount0 * amount1);
@@ -125,6 +120,7 @@ contract Pair is ERC20 {
             // only counts the smaller side, so it can't be used to shift the price for free.
             liquidity = Math.min((amount0 * supply) / r0, (amount1 * supply) / r1);
         }
+        // slither-disable-next-line incorrect-equality
         if (liquidity == 0) revert InsufficientLiquidityMinted();
 
         _mint(to, liquidity);
@@ -133,8 +129,8 @@ contract Pair is ERC20 {
     }
 
     /// @notice Burn the LP tokens sent to the pair and return the underlying tokens to `to`.
-    function burn(address to) external lock returns (uint256 amount0, uint256 amount1) {
-        (uint112 r0, uint112 r1,) = getReserves();
+    function burn(address to) external nonReentrant returns (uint256 amount0, uint256 amount1) {
+        (uint112 r0, uint112 r1) = (_reserve0, _reserve1);
         uint256 balance0 = IERC20(token0).balanceOf(address(this));
         uint256 balance1 = IERC20(token1).balanceOf(address(this));
         uint256 liquidity = balanceOf(address(this));
@@ -142,6 +138,7 @@ contract Pair is ERC20 {
         uint256 supply = totalSupply();
         amount0 = (liquidity * balance0) / supply;
         amount1 = (liquidity * balance1) / supply;
+        // slither-disable-next-line incorrect-equality
         if (amount0 == 0 || amount1 == 0) revert InsufficientLiquidityBurned();
 
         _burn(address(this), liquidity);
@@ -161,12 +158,9 @@ contract Pair is ERC20 {
     /// @notice Send out `amount0Out`/`amount1Out` to `to`. Input must already be in the pair,
     ///         or (flash swap) be sent back during the `flashSwapCall` callback when `data` is
     ///         non-empty. Either way, the constant-product check runs after.
-    function swap(uint256 amount0Out, uint256 amount1Out, address to, bytes calldata data) external lock {
+    function swap(uint256 amount0Out, uint256 amount1Out, address to, bytes calldata data) external nonReentrant {
         if (amount0Out == 0 && amount1Out == 0) revert InsufficientOutputAmount();
-        {
-            (uint112 r0, uint112 r1,) = getReserves();
-            if (amount0Out >= r0 || amount1Out >= r1) revert InsufficientLiquidity();
-        }
+        if (amount0Out >= _reserve0 || amount1Out >= _reserve1) revert InsufficientLiquidity();
         if (to == token0 || to == token1) revert InvalidTo();
 
         // Optimistically send the output first. This is what makes flash swaps possible.
@@ -178,13 +172,13 @@ contract Pair is ERC20 {
     }
 
     /// @notice Send tokens above the reserves (e.g. accidental transfers) to `to`.
-    function skim(address to) external lock {
+    function skim(address to) external nonReentrant {
         IERC20(token0).safeTransfer(to, IERC20(token0).balanceOf(address(this)) - _reserve0);
         IERC20(token1).safeTransfer(to, IERC20(token1).balanceOf(address(this)) - _reserve1);
     }
 
     /// @notice Set the reserves to the current balances.
-    function sync() external lock {
+    function sync() external nonReentrant {
         _update(IERC20(token0).balanceOf(address(this)), IERC20(token1).balanceOf(address(this)), _reserve0, _reserve1);
     }
 
@@ -199,11 +193,12 @@ contract Pair is ERC20 {
         uint256 amount0In;
         uint256 amount1In;
         {
-            (uint112 r0, uint112 r1,) = getReserves();
+            (uint112 r0, uint112 r1) = (_reserve0, _reserve1);
             uint256 balance0 = IERC20(token0).balanceOf(address(this));
             uint256 balance1 = IERC20(token1).balanceOf(address(this));
             amount0In = balance0 > r0 - amount0Out ? balance0 - (r0 - amount0Out) : 0;
             amount1In = balance1 > r1 - amount1Out ? balance1 - (r1 - amount1Out) : 0;
+            // slither-disable-next-line incorrect-equality
             if (amount0In == 0 && amount1In == 0) revert InsufficientInputAmount();
 
             // k must not decrease after charging the fee on the input:
@@ -221,7 +216,7 @@ contract Pair is ERC20 {
     ///      previous price weighted by how long it lasted.
     function _update(uint256 balance0, uint256 balance1, uint112 r0, uint112 r1) private {
         if (balance0 > type(uint112).max || balance1 > type(uint112).max) revert Overflow();
-        uint32 blockTimestamp = uint32(block.timestamp % 2 ** 32);
+        uint32 blockTimestamp = uint32(block.timestamp); // truncation is intended; wraps in 2106
         unchecked {
             uint32 elapsed = blockTimestamp - _blockTimestampLast; // wraps around by design
             if (elapsed > 0 && r0 != 0 && r1 != 0) {

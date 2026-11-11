@@ -28,6 +28,11 @@ contract FlashArbitrageTest is DexFixture {
         return (rUsd * 1e18) / rEth;
     }
 
+    function test_RevertWhen_ConstructedWithZeroFactory() public {
+        vm.expectRevert(FlashArbitrage.ZeroAddress.selector);
+        new FlashArbitrage(address(0));
+    }
+
     function test_ArbitrageProfitWithNoCapital() public {
         _dislocate();
         uint256 priceBefore = _ethPriceInUsdPool();

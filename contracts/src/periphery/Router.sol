@@ -20,6 +20,7 @@ contract Router {
     address public immutable factory;
 
     error Expired();
+    error ZeroAddress();
     error InsufficientAAmount();
     error InsufficientBAmount();
     error InsufficientOutputAmount();
@@ -31,6 +32,7 @@ contract Router {
     }
 
     constructor(address factory_) {
+        if (factory_ == address(0)) revert ZeroAddress();
         factory = factory_;
     }
 
@@ -51,6 +53,7 @@ contract Router {
         uint256 deadline
     ) external ensure(deadline) returns (uint256 amountA, uint256 amountB, uint256 liquidity) {
         if (Factory(factory).getPair(tokenA, tokenB) == address(0)) {
+            // slither-disable-next-line unused-return
             Factory(factory).createPair(tokenA, tokenB);
         }
         (amountA, amountB) = _optimalAmounts(tokenA, tokenB, amountADesired, amountBDesired, amountAMin, amountBMin);
@@ -71,8 +74,7 @@ contract Router {
         IERC20(pair).safeTransferFrom(msg.sender, pair, liquidity);
         (uint256 amount0, uint256 amount1) = Pair(pair).burn(to);
 
-        (address token0,) = DexLibrary.sortTokens(tokenA, tokenB);
-        (amountA, amountB) = tokenA == token0 ? (amount0, amount1) : (amount1, amount0);
+        (amountA, amountB) = DexLibrary.isToken0(tokenA, tokenB) ? (amount0, amount1) : (amount1, amount0);
         if (amountA < amountAMin) revert InsufficientAAmount();
         if (amountB < amountBMin) revert InsufficientBAmount();
     }
@@ -179,10 +181,9 @@ contract Router {
     function _swap(uint256[] memory amounts, address[] calldata path, address to) internal {
         for (uint256 i = 0; i < path.length - 1; ++i) {
             (address input, address output) = (path[i], path[i + 1]);
-            (address token0,) = DexLibrary.sortTokens(input, output);
             uint256 amountOut = amounts[i + 1];
             (uint256 amount0Out, uint256 amount1Out) =
-                input == token0 ? (uint256(0), amountOut) : (amountOut, uint256(0));
+                DexLibrary.isToken0(input, output) ? (uint256(0), amountOut) : (amountOut, uint256(0));
             address recipient = i < path.length - 2 ? DexLibrary.pairFor(factory, output, path[i + 2]) : to;
             Pair(DexLibrary.pairFor(factory, input, output)).swap(amount0Out, amount1Out, recipient, new bytes(0));
         }

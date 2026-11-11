@@ -18,9 +18,10 @@ library DexLibrary {
     uint256 internal constant FEE_DENOMINATOR = 10_000;
     uint256 internal constant FEE_MULTIPLIER = 9_970; // 1 - 0.3%
 
-    function sortTokens(address tokenA, address tokenB) internal pure returns (address token0, address token1) {
-        if (tokenA == tokenB) revert IdenticalTokens();
-        (token0, token1) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
+    /// @notice Whether `token` is token0 of its pair with `other` (pairs order tokens by address).
+    function isToken0(address token, address other) internal pure returns (bool) {
+        if (token == other) revert IdenticalTokens();
+        return token < other;
     }
 
     function pairFor(address factory, address tokenA, address tokenB) internal view returns (address pair) {
@@ -34,9 +35,10 @@ library DexLibrary {
         view
         returns (uint256 reserveA, uint256 reserveB)
     {
-        (address token0,) = sortTokens(tokenA, tokenB);
+        bool aIsToken0 = isToken0(tokenA, tokenB);
+        // slither-disable-next-line unused-return
         (uint112 r0, uint112 r1,) = Pair(pairFor(factory, tokenA, tokenB)).getReserves();
-        (reserveA, reserveB) = tokenA == token0 ? (uint256(r0), uint256(r1)) : (uint256(r1), uint256(r0));
+        (reserveA, reserveB) = aIsToken0 ? (uint256(r0), uint256(r1)) : (uint256(r1), uint256(r0));
     }
 
     /// @notice Amount of B worth `amountA` at the current price, without fees or price impact.

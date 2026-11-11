@@ -1,24 +1,27 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Pair, IFlashSwapCallee} from "../src/core/Pair.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {DexFixture} from "./utils/DexFixture.sol";
 
 /// @notice Borrows in a flash swap and repays `repayBps` of what the fee-inclusive repayment should be.
+///         Mode 1 tries to call back into the pair; mode 2 tries to read its (stale) reserves.
 contract FlashBorrower is IFlashSwapCallee {
     uint256 public repayBps;
-    bool public reenter;
+    uint8 public mode;
 
-    function borrow(Pair pair, uint256 amount0Out, uint256 amount1Out, uint256 repayBps_, bool reenter_) external {
+    function borrow(Pair pair, uint256 amount0Out, uint256 amount1Out, uint256 repayBps_, uint8 mode_) external {
         repayBps = repayBps_;
-        reenter = reenter_;
+        mode = mode_;
         pair.swap(amount0Out, amount1Out, address(this), "flash");
     }
 
     function flashSwapCall(address, uint256 amount0Out, uint256 amount1Out, bytes calldata) external {
         Pair pair = Pair(msg.sender);
-        if (reenter) pair.sync();
+        if (mode == 1) pair.sync();
+        if (mode == 2) pair.getReserves();
         // Repaying in the same token: need amountOut / 0.997, rounded up.
         if (amount0Out > 0) _repay(pair.token0(), msg.sender, amount0Out);
         if (amount1Out > 0) _repay(pair.token1(), msg.sender, amount1Out);
@@ -205,7 +208,7 @@ contract PairTest is DexFixture {
     function test_FlashSwapRepaidWithFee() public {
         _add(10e18, 10e18);
         FlashBorrower borrower = new FlashBorrower();
-        borrower.borrow(pair, 1e18, 0, 10_000, false);
+        borrower.borrow(pair, 1e18, 0, 10_000, 0);
 
         assertEq(t0.balanceOf(address(borrower)), 1e18); // kept the loan, paid the fee from its own funds
         (uint112 r0,,) = pair.getReserves();
@@ -216,14 +219,22 @@ contract PairTest is DexFixture {
         _add(10e18, 10e18);
         FlashBorrower borrower = new FlashBorrower();
         vm.expectRevert(Pair.K.selector);
-        borrower.borrow(pair, 0, 1e18, 9_990, false); // 0.1% short
+        borrower.borrow(pair, 0, 1e18, 9_990, 0); // 0.1% short
     }
 
     function test_RevertWhen_ReenteringDuringFlashSwap() public {
         _add(10e18, 10e18);
         FlashBorrower borrower = new FlashBorrower();
+        vm.expectRevert(ReentrancyGuard.ReentrancyGuardReentrantCall.selector);
+        borrower.borrow(pair, 1e18, 0, 10_000, 1);
+    }
+
+    /// Read-only reentrancy: mid-flash-swap the reserves are stale, so nobody may read them.
+    function test_RevertWhen_ReadingReservesDuringFlashSwap() public {
+        _add(10e18, 10e18);
+        FlashBorrower borrower = new FlashBorrower();
         vm.expectRevert(Pair.Locked.selector);
-        borrower.borrow(pair, 1e18, 0, 10_000, true);
+        borrower.borrow(pair, 1e18, 0, 10_000, 2);
     }
 
     // ------------------------------------------------------------------

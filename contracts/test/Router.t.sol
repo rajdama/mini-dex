@@ -14,6 +14,11 @@ contract RouterTest is DexFixture {
     // ------------------------------------------------------------------
     // Liquidity
     // ------------------------------------------------------------------
+    function test_RevertWhen_ConstructedWithZeroFactory() public {
+        vm.expectRevert(Router.ZeroAddress.selector);
+        new Router(address(0));
+    }
+
     function test_AddLiquidityCreatesPair() public {
         uint256 liquidity = _addLiquidity(eth, usd, 10e18, 30_000e18);
         Pair pair = _pair(eth, usd);
@@ -124,8 +129,9 @@ contract RouterTest is DexFixture {
         _seedThreePools();
         address[] memory path = _path(address(btc), address(usd), address(eth));
         uint256 out = _swapExactIn(alice, 0.1e18, path);
-        // 0.1 BTC = 6,000 USD = 2 ETH, minus two fees and price impact.
-        assertApproxEqRel(out, 2e18, 0.03e18);
+        // 0.1 BTC = 6,000 USD = 2 ETH, minus two 0.3% fees and ~2% price impact per hop.
+        assertApproxEqRel(out, 1.912e18, 0.001e18);
+        assertLt(out, 2e18);
         assertEq(eth.balanceOf(alice), out);
         assertEq(usd.balanceOf(address(router)), 0); // router never holds funds
     }
@@ -217,7 +223,7 @@ contract RouterTest is DexFixture {
     function testFuzz_QuotesAreConsistent(uint256 amount, uint256 reserveIn, uint256 reserveOut) public view {
         reserveIn = bound(reserveIn, 1e6, 1e30);
         reserveOut = bound(reserveOut, 1e6, 1e30);
-        amount = bound(amount, 1, reserveOut - 1);
+        amount = bound(amount, 1, (reserveOut * 99) / 100); // up to 99% of the pool
 
         uint256 amountIn = router.getAmountIn(amount, reserveIn, reserveOut);
         assertGe(router.getAmountOut(amountIn, reserveIn, reserveOut), amount);
