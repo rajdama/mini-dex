@@ -163,8 +163,10 @@ contract Pair is ERC20 {
     ///         non-empty. Either way, the constant-product check runs after.
     function swap(uint256 amount0Out, uint256 amount1Out, address to, bytes calldata data) external lock {
         if (amount0Out == 0 && amount1Out == 0) revert InsufficientOutputAmount();
-        (uint112 r0, uint112 r1,) = getReserves();
-        if (amount0Out >= r0 || amount1Out >= r1) revert InsufficientLiquidity();
+        {
+            (uint112 r0, uint112 r1,) = getReserves();
+            if (amount0Out >= r0 || amount1Out >= r1) revert InsufficientLiquidity();
+        }
         if (to == token0 || to == token1) revert InvalidTo();
 
         // Optimistically send the output first. This is what makes flash swaps possible.
@@ -172,20 +174,7 @@ contract Pair is ERC20 {
         if (amount1Out > 0) IERC20(token1).safeTransfer(to, amount1Out);
         if (data.length > 0) IFlashSwapCallee(to).flashSwapCall(msg.sender, amount0Out, amount1Out, data);
 
-        uint256 balance0 = IERC20(token0).balanceOf(address(this));
-        uint256 balance1 = IERC20(token1).balanceOf(address(this));
-        uint256 amount0In = balance0 > r0 - amount0Out ? balance0 - (r0 - amount0Out) : 0;
-        uint256 amount1In = balance1 > r1 - amount1Out ? balance1 - (r1 - amount1Out) : 0;
-        if (amount0In == 0 && amount1In == 0) revert InsufficientInputAmount();
-
-        // k must not decrease after charging the fee on the input:
-        // (balance0 - 0.3% of amount0In) * (balance1 - 0.3% of amount1In) >= reserve0 * reserve1
-        uint256 adjusted0 = balance0 * 10_000 - amount0In * FEE_BPS;
-        uint256 adjusted1 = balance1 * 10_000 - amount1In * FEE_BPS;
-        if (adjusted0 * adjusted1 < uint256(r0) * uint256(r1) * 1e8) revert K();
-
-        _update(balance0, balance1, r0, r1);
-        emit Swap(msg.sender, to, amount0In, amount1In, amount0Out, amount1Out);
+        _settleSwap(amount0Out, amount1Out, to);
     }
 
     /// @notice Send tokens above the reserves (e.g. accidental transfers) to `to`.
@@ -202,6 +191,31 @@ contract Pair is ERC20 {
     // ------------------------------------------------------------------
     // Internal
     // ------------------------------------------------------------------
+
+    /// @dev Works out what came in, enforces the constant-product rule after fees, stores the
+    ///      new reserves and emits Swap. Split out of `swap` to keep each function's stack small.
+    ///      Reserves can't have changed since `swap` read them: the pair is locked.
+    function _settleSwap(uint256 amount0Out, uint256 amount1Out, address to) private {
+        uint256 amount0In;
+        uint256 amount1In;
+        {
+            (uint112 r0, uint112 r1,) = getReserves();
+            uint256 balance0 = IERC20(token0).balanceOf(address(this));
+            uint256 balance1 = IERC20(token1).balanceOf(address(this));
+            amount0In = balance0 > r0 - amount0Out ? balance0 - (r0 - amount0Out) : 0;
+            amount1In = balance1 > r1 - amount1Out ? balance1 - (r1 - amount1Out) : 0;
+            if (amount0In == 0 && amount1In == 0) revert InsufficientInputAmount();
+
+            // k must not decrease after charging the fee on the input:
+            // (balance0 - 0.3% of amount0In) * (balance1 - 0.3% of amount1In) >= reserve0 * reserve1
+            uint256 adjusted0 = balance0 * 10_000 - amount0In * FEE_BPS;
+            uint256 adjusted1 = balance1 * 10_000 - amount1In * FEE_BPS;
+            if (adjusted0 * adjusted1 < uint256(r0) * uint256(r1) * 1e8) revert K();
+
+            _update(balance0, balance1, r0, r1);
+        }
+        emit Swap(msg.sender, to, amount0In, amount1In, amount0Out, amount1Out);
+    }
 
     /// @dev Stores new reserves and, on the first update of each block, accumulates the
     ///      previous price weighted by how long it lasted.
