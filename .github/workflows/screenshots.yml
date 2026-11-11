@@ -79,7 +79,8 @@ jobs:
       - name: Take screenshots
         run: |
           mkdir -p /tmp/pw && cd /tmp/pw && npm init -y >/dev/null && npm install --no-audit --no-fund playwright@1.48.2
-          npx playwright install --with-deps chromium
+          sudo apt-get update -qq || true
+          npx playwright install --with-deps chromium || (sleep 20 && sudo apt-get update -qq && npx playwright install --with-deps chromium)
           cp "$GITHUB_WORKSPACE/scripts/demo/screenshots.mjs" /tmp/pw/
           node /tmp/pw/screenshots.mjs "$RUNNER_TEMP/shots"
           ls -la "$RUNNER_TEMP/shots"
