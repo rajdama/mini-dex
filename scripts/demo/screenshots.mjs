@@ -73,9 +73,10 @@ async function newPage(browser, viewport) {
 async function ensureConnected(page) {
   const connected = page.getByText("0x70", { exact: false }).first();
   const connectButton = page.getByRole("button", { name: "Connect Wallet" }).first();
-  await Promise.race([connected.waitFor(), connectButton.waitFor()]);
-  if (!(await connected.isVisible())) {
-    await connectButton.click();
+  // Give auto-connect a moment; the Connect button flashes up before it completes.
+  const autoConnected = await connected.waitFor({ timeout: 10_000 }).then(() => true, () => false);
+  if (!autoConnected) {
+    await connectButton.click({ force: true });
     const dialog = page.getByRole("dialog");
     for (let attempt = 1; attempt <= 8; attempt++) {
       await page.waitForTimeout(1000);
