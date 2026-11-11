@@ -84,7 +84,7 @@ async function ensureConnected(page) {
     }
     await connected.waitFor();
   }
-  await page.getByText("Free test tokens").waitFor();
+  await page.locator(".faucet-bar").waitFor();
   await page.waitForTimeout(2500);
 }
 
