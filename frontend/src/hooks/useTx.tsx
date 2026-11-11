@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { usePublicClient, useWriteContract } from "wagmi";
+import { useAccount, usePublicClient, useWriteContract } from "wagmi";
 import { BaseError, type Hash } from "viem";
 
 type TxStatus = "idle" | "wallet" | "confirming" | "success" | "error";
@@ -31,12 +31,21 @@ export function TxProvider({ children }: { children: ReactNode }) {
   const { writeContractAsync } = useWriteContract();
   const publicClient = usePublicClient();
   const queryClient = useQueryClient();
+  const { address } = useAccount();
 
   const send = useCallback(
     async (label: string, request: WriteRequest) => {
       setState({ status: "wallet", label });
       try {
-        const hash = await writeContractAsync(request);
+        // Estimate gas ourselves and add a 30% margin. Gas use can change between estimation and
+        // inclusion: e.g. a pair's price oracle only updates on the first trade in a new block, which
+        // the estimate may not include. Estimating first also surfaces revert reasons before the
+        // wallet prompt, instead of after paying for a failed transaction.
+        const estimate = await publicClient!.estimateContractGas({
+          ...(request as Parameters<NonNullable<typeof publicClient>["estimateContractGas"]>[0]),
+          account: address,
+        });
+        const hash = await writeContractAsync({ ...request, gas: (estimate * 13n) / 10n });
         setState({ status: "confirming", label, hash });
         const receipt = await publicClient!.waitForTransactionReceipt({ hash });
         if (receipt.status !== "success") throw new Error("Transaction reverted");
@@ -49,7 +58,7 @@ export function TxProvider({ children }: { children: ReactNode }) {
         return false;
       }
     },
-    [writeContractAsync, publicClient, queryClient],
+    [writeContractAsync, publicClient, queryClient, address],
   );
 
   const dismiss = useCallback(() => setState({ status: "idle" }), []);
