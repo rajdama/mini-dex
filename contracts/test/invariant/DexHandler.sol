@@ -152,7 +152,8 @@ contract DexHandler is Test {
         uint256 s = startSeed % 3;
         (uint256 a, uint256 b) = reverse ? ((s + 2) % 3, (s + 1) % 3) : ((s + 1) % 3, (s + 2) % 3);
         address[] memory path = new address[](4);
-        (path[0], path[1], path[2], path[3]) = (address(tokens[s]), address(tokens[a]), address(tokens[b]), address(tokens[s]));
+        (path[0], path[1], path[2], path[3]) =
+        (address(tokens[s]), address(tokens[a]), address(tokens[b]), address(tokens[s]));
 
         (uint256 reserveIn,) = router.getReserves(path[0], path[1]);
         uint256 amountIn = bound(amountSeed, reserveIn / 1e6 + 1, reserveIn / 10 + 1);

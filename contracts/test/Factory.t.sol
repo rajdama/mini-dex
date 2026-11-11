@@ -14,7 +14,8 @@ contract FactoryTest is DexFixture {
         address pairAddr = factory.createPair(address(usd), address(eth));
         Pair pair = Pair(pairAddr);
 
-        (address lo, address hi) = address(eth) < address(usd) ? (address(eth), address(usd)) : (address(usd), address(eth));
+        (address lo, address hi) =
+            address(eth) < address(usd) ? (address(eth), address(usd)) : (address(usd), address(eth));
         assertEq(pair.token0(), lo);
         assertEq(pair.token1(), hi);
         assertEq(pair.factory(), address(factory));
@@ -29,7 +30,8 @@ contract FactoryTest is DexFixture {
     }
 
     function test_PairAddressIsPredictable() public {
-        (address lo, address hi) = address(eth) < address(usd) ? (address(eth), address(usd)) : (address(usd), address(eth));
+        (address lo, address hi) =
+            address(eth) < address(usd) ? (address(eth), address(usd)) : (address(usd), address(eth));
         bytes32 salt = keccak256(abi.encodePacked(lo, hi));
         address predicted = address(
             uint160(uint256(keccak256(abi.encodePacked(hex"ff", address(factory), salt, factory.pairCodeHash()))))

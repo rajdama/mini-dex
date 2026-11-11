@@ -174,7 +174,8 @@ contract Router {
             (address input, address output) = (path[i], path[i + 1]);
             (address token0,) = DexLibrary.sortTokens(input, output);
             uint256 amountOut = amounts[i + 1];
-            (uint256 amount0Out, uint256 amount1Out) = input == token0 ? (uint256(0), amountOut) : (amountOut, uint256(0));
+            (uint256 amount0Out, uint256 amount1Out) =
+                input == token0 ? (uint256(0), amountOut) : (amountOut, uint256(0));
             address recipient = i < path.length - 2 ? DexLibrary.pairFor(factory, output, path[i + 2]) : to;
             Pair(DexLibrary.pairFor(factory, input, output)).swap(amount0Out, amount1Out, recipient, new bytes(0));
         }

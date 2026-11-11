@@ -147,7 +147,7 @@ contract PairTest is DexFixture {
     function test_RevertWhen_SwapWithoutFee() public {
         _add(10e18, 10e18);
         // The no-fee output (x*y=k exactly) must fail: the 0.3% fee has to stay in the pool.
-        uint256 noFeeOut = (1e18 * 10e18) / (10e18 + 1e18);
+        uint256 noFeeOut = (uint256(1e18) * 10e18) / (10e18 + 1e18);
         t0.mint(address(pair), 1e18);
         vm.expectRevert(Pair.K.selector);
         pair.swap(0, noFeeOut, alice, "");

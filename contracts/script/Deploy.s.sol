@@ -69,9 +69,10 @@ contract Deploy is Script {
         b.mint(deployer, amountB);
         a.approve(address(d.router), amountA);
         b.approve(address(d.router), amountB);
-        d.router.addLiquidity(
-            address(a), address(b), amountA, amountB, amountA, amountB, deployer, block.timestamp + 1 hours
-        );
+        d.router
+            .addLiquidity(
+                address(a), address(b), amountA, amountB, amountA, amountB, deployer, block.timestamp + 1 hours
+            );
         return d.factory.getPair(address(a), address(b));
     }
 

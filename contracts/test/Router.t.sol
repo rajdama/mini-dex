@@ -31,8 +31,7 @@ contract RouterTest is DexFixture {
         vm.startPrank(alice);
         eth.approve(address(router), 1e18);
         usd.approve(address(router), 5_000e18);
-        (uint256 a, uint256 b,) =
-            router.addLiquidity(address(eth), address(usd), 1e18, 5_000e18, 0, 0, alice, DEADLINE);
+        (uint256 a, uint256 b,) = router.addLiquidity(address(eth), address(usd), 1e18, 5_000e18, 0, 0, alice, DEADLINE);
         vm.stopPrank();
         assertEq(a, 1e18);
         assertEq(b, 3_000e18); // only what the ratio needs
@@ -46,8 +45,7 @@ contract RouterTest is DexFixture {
         vm.startPrank(alice);
         eth.approve(address(router), 5e18);
         usd.approve(address(router), 3_000e18);
-        (uint256 a, uint256 b,) =
-            router.addLiquidity(address(eth), address(usd), 5e18, 3_000e18, 0, 0, alice, DEADLINE);
+        (uint256 a, uint256 b,) = router.addLiquidity(address(eth), address(usd), 5e18, 3_000e18, 0, 0, alice, DEADLINE);
         vm.stopPrank();
         assertEq(a, 1e18);
         assertEq(b, 3_000e18);
@@ -72,8 +70,7 @@ contract RouterTest is DexFixture {
         Pair pair = _pair(eth, usd);
         vm.startPrank(lp);
         pair.approve(address(router), liquidity);
-        (uint256 a, uint256 b) =
-            router.removeLiquidity(address(usd), address(eth), liquidity, 0, 0, lp, DEADLINE);
+        (uint256 a, uint256 b) = router.removeLiquidity(address(usd), address(eth), liquidity, 0, 0, lp, DEADLINE);
         vm.stopPrank();
         // Order follows the arguments: usd first.
         assertApproxEqRel(a, 30_000e18, 1e12);
@@ -172,7 +169,10 @@ contract RouterTest is DexFixture {
     // ------------------------------------------------------------------
     function test_QuoteFunctions() public view {
         assertEq(router.quote(1e18, 100e18, 300_000e18), 3_000e18);
-        assertEq(router.getAmountOut(1e18, 100e18, 300_000e18), (1e18 * 9_970 * 300_000e18) / (100e18 * 10_000 + 1e18 * 9_970));
+        assertEq(
+            router.getAmountOut(1e18, 100e18, 300_000e18),
+            (uint256(1e18) * 9_970 * 300_000e18) / (100e18 * 10_000 + 1e18 * 9_970)
+        );
         uint256 amountIn = router.getAmountIn(3_000e18, 100e18, 300_000e18);
         assertGe(router.getAmountOut(amountIn, 100e18, 300_000e18), 3_000e18);
     }
