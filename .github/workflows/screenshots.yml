@@ -87,8 +87,18 @@ jobs:
       - name: Logs on failure
         if: failure()
         run: |
-          tail -80 /tmp/indexer.log || true
-          tail -50 /tmp/next.log || true
+          tail -40 /tmp/indexer.log || true
+          tail -30 /tmp/next.log || true
+          echo "--- recent transactions (wall clock $(date +%s)) ---"
+          RPC=http://127.0.0.1:8545
+          LATEST=$(cast block-number --rpc-url $RPC)
+          for b in $(seq $((LATEST - 5)) $LATEST); do
+            for h in $(cast block $b --json --rpc-url $RPC | jq -r '.transactions[]'); do
+              st=$(cast receipt $h status --rpc-url $RPC)
+              echo "block $b time $(cast block $b timestamp --rpc-url $RPC) tx $h status $st"
+              case "$st" in 0*) cast run $h --rpc-url $RPC 2>&1 | tail -25 ;; esac
+            done
+          done
 
       - name: Publish to the screenshots branch
         if: always()
