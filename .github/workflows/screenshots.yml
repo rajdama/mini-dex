@@ -13,6 +13,7 @@ jobs:
   screenshots:
     name: Full-stack screenshots
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     services:
       postgres:
         image: postgres:16
@@ -77,6 +78,7 @@ jobs:
           for i in $(seq 1 30); do curl -sf http://127.0.0.1:3000 >/dev/null && break; sleep 1; done
 
       - name: Take screenshots
+        timeout-minutes: 15
         run: |
           mkdir -p /tmp/pw && cd /tmp/pw && npm init -y >/dev/null && npm install --no-audit --no-fund playwright@1.48.2
           sudo apt-get update -qq || true
